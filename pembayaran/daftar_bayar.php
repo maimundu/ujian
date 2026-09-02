@@ -1,12 +1,45 @@
 <?php
 // ================== KONFIGURASI ==================
 $file_data = "data/pembayaran.json";
-// Ganti kata sandi agar hanya sekolah yang bisa akses
-$kata_sandi = "sekolah123"; // Ubah sandi ini!
+$kata_sandi = "sekolah123"; // Ubah kata sandi rahasia sekolah!
 // =================================================
 
-// Proteksi akses
 session_start();
+
+// === FITUR EKSPOR KE CSV ===
+if (isset($_GET['ekspor']) && $_GET['ekspor'] === 'csv') {
+    if (!isset($_SESSION['sudah_login']) || $_SESSION['sudah_login'] !== true) {
+        exit("Akses ditolak!");
+    }
+    $data = file_exists($file_data) ? json_decode(file_get_contents($file_data), true) ?: [] : [];
+    
+    header('Content-Type: text/csv; charset=UTF-8');
+    header('Content-Disposition: attachment; filename=Daftar_Pembayaran_' . date('Y-m-d_His') . '.csv');
+    $output = fopen('php://output', 'w');
+    
+    // Header kolom
+    fputcsv($output, ['Waktu', 'Nama Siswa', 'Kelas', 'Jenis Pembayaran', 'Total (Rp)', 'Metode', 'Status', 'File Bukti']);
+    
+    // Isi data
+    foreach ($data as $item) {
+        $jenis = is_array($item['jenis']) ? implode(', ', $item['jenis']) : $item['jenis'];
+        $bukti = !empty($item['bukti']) ? (isset($_SERVER['HTTPS']) ? 'https' : 'http') . "://$_SERVER[HTTP_HOST]" . dirname($_SERVER['PHP_SELF']) . "/" . $item['bukti'] : 'Tidak Ada';
+        fputcsv($output, [
+            $item['waktu'],
+            $item['nama'],
+            $item['kelas'],
+            $jenis,
+            $item['total'],
+            $item['metode'],
+            $item['status'],
+            $bukti
+        ]);
+    }
+    fclose($output);
+    exit;
+}
+
+// === PROTEKSI AKSES ===
 if (!isset($_SESSION['sudah_login']) || $_SESSION['sudah_login'] !== true) {
     if ($_POST['sandi'] === $kata_sandi) {
         $_SESSION['sudah_login'] = true;
@@ -34,7 +67,7 @@ if (!isset($_SESSION['sudah_login']) || $_SESSION['sudah_login'] !== true) {
     exit;
 }
 
-// Tandai sebagai sudah diverifikasi
+// === TANDAI SUDAH DIVERIFIKASI ===
 if (isset($_GET['verifikasi'])) {
     $data = json_decode(file_get_contents($file_data), true);
     foreach ($data as &$item) {
@@ -48,7 +81,7 @@ if (isset($_GET['verifikasi'])) {
     exit;
 }
 
-// Hapus entri
+// === HAPUS DATA ===
 if (isset($_GET['hapus'])) {
     $data = json_decode(file_get_contents($file_data), true);
     $data = array_filter($data, fn($i) => $i['id'] !== $_GET['hapus']);
@@ -57,7 +90,18 @@ if (isset($_GET['hapus'])) {
     exit;
 }
 
+// === KELUAR ===
+if (isset($_GET['keluar'])) {
+    session_destroy();
+    header("Location: daftar_bayar.php");
+    exit;
+}
+
+// === BACA DATA ===
 $data = file_exists($file_data) ? json_decode(file_get_contents($file_data), true) ?: [] : [];
+$jumlah_total = count($data);
+$jumlah_menunggu = count(array_filter($data, fn($i) => $i['status']==='Menunggu'));
+$total_uang = array_sum(array_column($data, 'total'));
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -69,48 +113,53 @@ $data = file_exists($file_data) ? json_decode(file_get_contents($file_data), tru
         * {box-sizing: border-box; font-family: Segoe UI, sans-serif;}
         body {background: #f0f4f8; margin: 0; padding: 20px;}
         .container {max-width: 1000px; margin: 0 auto;}
-        .header {display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;}
+        .header {display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; flex-wrap: wrap; gap: 10px;}
         h1 {color: #1e293b; margin: 0;}
-        .ringkas {display: flex; gap: 15px; margin-bottom: 20px;}
-        .kartu {background: #fff; padding: 15px 20px; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);}
+        .ringkas {display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap;}
+        .kartu {background: #fff; padding: 15px 20px; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); flex: 1; min-width: 150px;}
         .kartu h3 {margin: 0 0 5px 0; font-size: 14px; color: #64748b;}
         .kartu p {margin: 0; font-size: 22px; font-weight: 700; color: #1e293b;}
         table {width: 100%; border-collapse: collapse; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05);}
         th, td {padding: 12px 15px; text-align: left; border-bottom: 1px solid #f1f5f9;}
-        th {background: #f8fafc; font-weight: 600; color: #475569; font-size: 14px;}
+        th {background: #f8fafc; font-weight: 600; color: #475569; font-size: 14px; white-space: nowrap;}
         tr:hover {background: #f8fafc;}
-        .waktu {font-size: 12px; color: #94a3b8;}
+        .waktu {font-size: 12px; color: #94a3b8; white-space: nowrap;}
         .status {padding: 4px 10px; border-radius: 20px; font-size: 13px; font-weight: 500;}
         .status.menunggu {background: #fef3c7; color: #92400e;}
         .status.selesai {background: #dcfce7; color: #166534;}
-        .btn {padding: 6px 12px; border-radius: 6px; text-decoration: none; font-size: 13px; font-weight: 500; display: inline-block; margin: 2px;}
+        .btn {padding: 6px 12px; border-radius: 6px; text-decoration: none; font-size: 13px; font-weight: 500; display: inline-block; margin: 2px; border: none; cursor: pointer;}
         .btn.verifikasi {background: #22c55e; color: #fff;}
         .btn.bukti {background: #3b82f6; color: #fff;}
         .btn.hapus {background: #ef4444; color: #fff;}
-        .btn.keluar {background: #f1f5f9; color: #475569; float: right; margin-top: 10px;}
+        .btn.keluar {background: #f1f5f9; color: #475569;}
+        .btn.ekspor {background: #10b981; color: #fff; font-weight: 600; padding: 8px 16px; font-size: 14px;}
+        .btn.ekspor:hover {background: #059669;}
         .kosong {text-align: center; padding: 40px; color: #94a3b8;}
-        @media(max-width:768px){th,td{padding:10px 8px;font-size:14px}}
+        @media(max-width:768px){th,td{padding:10px 8px;font-size:13px}}
     </style>
 </head>
 <body>
 <div class="container">
     <div class="header">
         <h1>📋 Daftar Pembayaran</h1>
-        <a href="?keluar" class="btn keluar">Keluar</a>
+        <div style="display:flex;gap:10px;align-items:center">
+            <a href="?ekspor=csv" class="btn ekspor" onclick="return confirm('Unduh data sebagai CSV?\\nBisa dibuka di Excel / Google Sheets')">📊 Ekspor ke CSV</a>
+            <a href="?keluar" class="btn keluar">Keluar</a>
+        </div>
     </div>
 
     <div class="ringkas">
         <div class="kartu">
             <h3>Total Pembayaran</h3>
-            <p><?php echo count($data); ?></p>
+            <p><?php echo $jumlah_total; ?></p>
         </div>
         <div class="kartu">
             <h3>Menunggu Verifikasi</h3>
-            <p><?php echo count(array_filter($data, fn($i) => $i['status']==='Menunggu')); ?></p>
+            <p><?php echo $jumlah_menunggu; ?></p>
         </div>
         <div class="kartu">
             <h3>Total Uang Masuk</h3>
-            <p>Rp <?php echo number_format(array_sum(array_column($data, 'total')),0,',','.'); ?></p>
+            <p>Rp <?php echo number_format($total_uang,0,',','.'); ?></p>
         </div>
     </div>
 
@@ -157,9 +206,3 @@ $data = file_exists($file_data) ? json_decode(file_get_contents($file_data), tru
 </div>
 </body>
 </html>
-<?php
-if (isset($_GET['keluar'])) {
-    session_destroy();
-    header("Location: daftar_bayar.php");
-    exit;
-}
